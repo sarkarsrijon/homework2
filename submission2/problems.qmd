@@ -38,12 +38,13 @@ glimpse(data.full)
 Problem 1
 
 ```{r}
-data.full <- data.full %>%
-  filter(!(partd == "Yes" & is.na(premium_partc)))
+plan_counts <- data.full %>% distinct(fips, year, contractid)
 ```
 
 ```{r}
-plan_counts <- data.full %>% group_by(fips) %>% count(county, year, name = "plan_count")
+plan_counts <- plan_counts %>% 
+    group_by(fips, year) %>%
+    summarise(plan_count = n(), .groups = "drop")
 ```
 
 ```{r}
@@ -52,8 +53,6 @@ boxplot(plan_count ~ year, data = plan_counts,
         ylab = "Plan Count",
         main = "Distribution of Plan Counts by Year")
 ```
-
-Problem 2
 
 ```{r}
 data.full <- data.full %>% mutate (basic_premium = case_when(
@@ -68,6 +67,8 @@ data.full <- data.full %>% mutate (basic_premium = case_when(
       )
     )
 ```
+
+Problem 2
 
 ```{r}
 data.full %>%
@@ -96,7 +97,6 @@ data.full %>%
 Problem 3
 
 ```{r}
-#| warning: false
 hhi_data <- data.full %>%
   mutate(share = avg_enrollment / avg_enrolled) %>%
   group_by(fips, year) %>%
@@ -122,7 +122,6 @@ ggplot(hhi_data, aes(x = year, y = mean_HHI)) + geom_line() + geom_point() + the
 Problem 4
 
 ```{r}
-#| warning: false
 ma_share_yearly <- data.full %>%
   mutate(ma_share = avg_enrolled / avg_eligibles) %>%
   group_by(year) %>%
@@ -215,7 +214,7 @@ print(results_table)
 
 Problem 7
 
-Explanation: Here, by pooled data, we meant grouping of all 1s in each quartile as a total group of treated entities, and then all 0s together from each quartile. On which we run our ATE estimators.
+Explanation: Here by pooled data we meant grouping of all 1s in each quartile as a total group of treated entities, and then all 0s together from each quartile. On which, we run our ATE estimators.
 
 ```{r}
 options(repos = c(CRAN = "https://cloud.r-project.org"))
