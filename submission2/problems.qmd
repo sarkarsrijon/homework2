@@ -110,6 +110,8 @@ hhi_data
 ```
 
 ```{r}
+#| warning: false
+
 ggplot(hhi_data, aes(x = year, y = mean_HHI)) + geom_line() + geom_point() + theme_minimal() + labs(
     x = "Year",
     y = "Mean HHI",
@@ -128,6 +130,8 @@ ma_share_yearly <- data.full %>%
 ```
 
 ```{r}
+#| warning: false
+
 ggplot(ma_share_yearly, aes(x = year, y = mean_share)) +
   geom_line() +
   geom_point() +
@@ -210,6 +214,8 @@ print(results_table)
 ```
 
 Problem 7
+
+Explanation: Here, by pooled data, we meant grouping of all 1s in each quartile as a total group of treated entities, and then all 0s together from each quartile. On which we run our ATE estimators.
 
 ```{r}
 options(repos = c(CRAN = "https://cloud.r-project.org"))
