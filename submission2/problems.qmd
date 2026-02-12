@@ -1,0 +1,376 @@
+---
+title: "Homework 1"
+subtitle: "Submission 2, Spring 2026"
+author: "Srijon Sarkar"
+format:
+  pdf:
+    output-file: "sarkar-s-hwk2-2"
+    output-ext:  "pdf"
+    header-includes:
+      - \usepackage{float}
+      - \floatplacement{table}{H}
+---
+
+```{r}
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, ggplot2, dplyr, lubridate, stringr, readxl, data.table, gdata, scales, data.table)
+
+source("..//functions-1.R")
+```
+
+```{r}
+data.2014 <- read.csv('../data/output/data-2014.csv')
+data.2015 <- read.csv('../data/output/data-2015.csv')
+data.2016 <- read.csv('../data/output/data-2016.csv')
+data.2017 <- read.csv('../data/output/data-2017.csv')
+data.2018 <- read.csv('../data/output/data-2018.csv')
+data.2019 <- read.csv('../data/output/data-2019.csv')
+```
+
+```{r}
+data.full <- rbind(data.2014, data.2015, data.2016, data.2017, data.2018, data.2019)
+
+glimpse(data.full)
+```
+
+Problem 1
+
+```{r}
+data.full <- data.full %>%
+  filter(!(partd == "Yes" & is.na(premium_partc)))
+```
+
+```{r}
+plan_counts <- data.full %>% group_by(fips) %>% count(county, year, name = "plan_count")
+```
+
+```{r}
+boxplot(plan_count ~ year, data = plan_counts,
+        xlab = "Year",
+        ylab = "Plan Count",
+        main = "Distribution of Plan Counts by Year")
+```
+
+Problem 2
+
+```{r}
+data.full <- data.full %>% mutate (basic_premium = case_when(
+        rebate_partc > 0 ~ 0,
+        partd == "No" & !is.na(premium) & is.na(premium_partc) ~ premium,
+        TRUE ~ premium_partc
+      ),
+      bid = case_when(
+        rebate_partc == 0 & basic_premium > 0 ~ (payment_partc + basic_premium) / riskscore_partc,
+        rebate_partc > 0  | basic_premium == 0 ~  payment_partc / riskscore_partc,
+        TRUE ~ NA_real_
+      )
+    )
+```
+
+```{r}
+data.full %>%
+  filter(year == 2014) %>%
+  ggplot(aes(x = bid)) +
+  geom_histogram(bins = 40, fill = "pink", color = "white")+
+  labs(
+    x = "Bid",
+    y = "Frequency",
+    title = "Year 2014"
+  )
+```
+
+```{r}
+data.full %>%
+  filter(year == 2018) %>%
+  ggplot(aes(x = bid)) +
+  geom_histogram(bins = 40, fill = "purple", color = "white")+
+  labs(
+    x = "Bid",
+    y = "Frequency",
+    title = "Year 2018"
+  )
+```
+
+Problem 3
+
+```{r}
+#| warning: false
+hhi_data <- data.full %>%
+  mutate(share = avg_enrollment / avg_enrolled) %>%
+  group_by(fips, year) %>%
+  summarise(HHI = sum(share^2, na.rm = TRUE), .groups = "drop") %>% 
+  group_by(year) %>% 
+  summarise(mean_HHI = mean(HHI, na.rm = TRUE), .groups = "drop")
+```
+
+```{r}
+hhi_data
+```
+
+```{r}
+ggplot(hhi_data, aes(x = year, y = mean_HHI)) + geom_line() + geom_point() + theme_minimal() + labs(
+    x = "Year",
+    y = "Mean HHI",
+    title = "HHI change over years, 2014–2019"
+  )
+```
+
+Problem 4
+
+```{r}
+#| warning: false
+ma_share_yearly <- data.full %>%
+  mutate(ma_share = avg_enrolled / avg_eligibles) %>%
+  group_by(year) %>%
+  summarise(mean_share = mean(ma_share, na.rm = TRUE), .groups = "drop")
+```
+
+```{r}
+ggplot(ma_share_yearly, aes(x = year, y = mean_share)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  labs(
+    x = "Year",
+    y = "Average MA Share",
+    title = "Average Medicare Advantage Share, 2014–2019"
+  )
+```
+
+Estimate ATEs
+
+Problem 5
+
+```{r}
+data.full.2018 <- data.full %>% filter(year == 2018)
+```
+
+```{r}
+colnames(data.full.2018)
+```
+
+```{r}
+hhi_data_2018 <- data.full.2018 %>%
+  mutate(share = avg_enrollment / avg_enrolled) %>%
+  group_by(fips, year) %>%
+  mutate(HHI = sum(share^2, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+```{r}
+hhi_data_33 <- quantile(hhi_data_2018$HHI, 0.33, na.rm = TRUE)
+hhi_data_66 <- quantile(hhi_data_2018$HHI, 0.66, na.rm = TRUE)
+```
+
+```{r}
+hhi_high <- hhi_data_2018 %>% filter(hhi_data_2018$HHI >= hhi_data_66)
+hhi_low <- hhi_data_2018 %>% filter(hhi_data_2018$HHI <= hhi_data_33)
+```
+
+```{r}
+avg_high <- hhi_high %>% summarise(avg_66 = mean(bid, na.rm = TRUE))
+avg_low <- hhi_low %>% summarise(avg_33 = mean(bid, na.rm = TRUE))
+
+cat("Average Bid in Uncompetitive Markets:", avg_high$avg_66, "\n")
+cat("Average Bid in Competitive Markets:", avg_low$avg_33, "\n")
+```
+
+Problem 6
+
+```{r}
+data.2018.ffs <- read.csv('../data/output/data-2018-ffs.csv')
+```
+
+```{r}
+data.2018.ffs <- data.2018.ffs %>% mutate(ffs_quartile = ntile(avg_ffscost, 4))
+```
+
+```{r}
+results <- lapply(1:4, function(q) {
+  treatment <- data.2018.ffs %>%
+    filter(ffs_quartile == q) %>%
+    summarise(avg_bid_treat = mean(bid, na.rm = TRUE))
+
+  control <- data.2018.ffs %>%
+    filter(ffs_quartile != q) %>%
+    summarise(avg_bid_control = mean(bid, na.rm = TRUE))
+
+  data.frame(
+    quartile = q,
+    avg_bid_treat = treatment$avg_bid_treat,
+    avg_bid_control = control$avg_bid_control
+  )
+})
+
+results_table <- do.call(rbind, results)
+
+print(results_table)
+```
+
+Problem 7
+
+```{r}
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+install.packages("MatchIt")
+```
+
+```{r}
+pooled_data <- lapply(1:4, function(q) {
+
+  dat_q <- data.2018.ffs %>%
+    mutate(
+      treat = ifelse(ffs_quartile == q, 1, 0),
+      outcome = bid,
+      covar = avg_ffscost
+    ) %>%
+    filter(!is.na(outcome), !is.na(treat), !is.na(covar))
+
+  dat_q
+})
+
+pooled_data <- do.call(rbind, pooled_data)
+```
+
+```{r}
+library(MatchIt)
+
+m.out <- matchit(
+  treat ~ covar,
+  data = pooled_data,
+  method = "nearest",
+  distance = pooled_data$covar,
+  replace = FALSE
+)
+
+m.data <- match.data(m.out)
+
+# ATE via simple difference in means
+ate_inv_var <- mean(m.data$outcome[m.data$treat == 1]) -
+  mean(m.data$outcome[m.data$treat == 0])
+```
+
+```{r}
+print(ate_inv_var)
+```
+
+```{r}
+m.out <- matchit(
+  treat ~ covar,
+  data = pooled_data,
+  method = "nearest",
+  distance = "mahalanobis",
+  replace = FALSE
+)
+
+m.data <- match.data(m.out)
+
+# ATE via simple difference in means
+ate_mahalanobis <- mean(m.data$outcome[m.data$treat == 1]) -
+  mean(m.data$outcome[m.data$treat == 0])
+```
+
+```{r}
+print(ate_mahalanobis)
+```
+
+```{r}
+logit.model <- glm(treat ~ covar, family = binomial, data = pooled_data)
+pooled_data$ps <- fitted(logit.model)
+
+pooled_data <- pooled_data %>%
+  mutate(ipw = case_when(
+    treat == 1 ~ 1/ps,
+    treat == 0 ~ 1/(1 - ps)
+  ))
+
+mean.w1 <- pooled_data %>%
+  filter(treat == 1) %>%
+  summarize(mean_y = weighted.mean(outcome, ipw))
+
+mean.w0 <- pooled_data %>%
+  filter(treat == 0) %>%
+  summarize(mean_y = weighted.mean(outcome, ipw))
+
+ate_ipw <- mean.w1$mean_y - mean.w0$mean_y
+```
+
+```{r}
+print(ate_ipw)
+```
+
+```{r}
+reg1 <- lm(outcome ~ covar, data = pooled_data %>% filter(treat == 1))
+reg0 <- lm(outcome ~ covar, data = pooled_data %>% filter(treat == 0))
+
+pred1 <- predict(reg1, newdata = pooled_data)
+pred0 <- predict(reg0, newdata = pooled_data)
+
+ate_regression <- mean(pred1 - pred0)
+```
+
+```{r}
+print(ate_regression)
+```
+
+Problem 8. ATE calculated with inverse variance distance and Mahalanobis distance are identical, while the ones calculated with IPW and simple linear regression differ vastly. 
+
+```{r}
+results_table <- data.frame(
+  ate_inv_var = ate_inv_var,
+  ate_mahalanobis = ate_mahalanobis,     # if you really want it twice
+  ate_ipw = ate_ipw,
+  ate_regression = ate_regression  # if you really want it twice
+)
+
+results_table
+```
+
+Problem 9. We will use my favorite Mahalanobis distance on total Medicare beneficiaries alongside the FFS quartile.
+
+```{r}
+pooled_data2 <- lapply(1:4, function(q) {
+
+  dat_q2 <- data.2018.ffs %>%
+    mutate(
+      treat = ifelse(ffs_quartile == q, 1, 0),
+      outcome = bid,
+      covar1 = avg_ffscost,
+      covar2 = n_enrol
+    ) %>%
+    filter(!is.na(outcome), !is.na(treat), !is.na(covar1), !is.na(covar2))
+
+  dat_q2
+})
+
+pooled_data2 <- do.call(rbind, pooled_data2)
+```
+
+```{r}
+m.out <- matchit(
+  treat ~ covar1 + covar2,
+  data = pooled_data2,
+  method = "nearest",
+  distance = "mahalanobis",
+  replace = FALSE
+)
+
+m.data <- match.data(m.out)
+
+# ATE via simple difference in means
+ate_mahalanobis_new <- mean(m.data$outcome[m.data$treat == 1]) -
+  mean(m.data$outcome[m.data$treat == 0])
+```
+
+```{r}
+print(ate_mahalanobis_new)
+```
+
+The absolute value of ATE has gone up when the total number of Medicare beneficiaries is included as a covariate. It is still comparable to ATE obtained via inverse distance weighing or Mahalanobis as opposed to IPW or regression, which are approximately 0.
+
+Problem 10
+
+My experience was fulfilling working with these large data chunks; it really completed my prior experiences. One thing I learned is that my code runs much cleaner and is easier to navigate, as I built most of it from class notes, my concepts, and simple structural logic, rather than using LLMs that I genuinely use strictly for my personal use. One thing that surprised me was how strenuous data management could be when I had to change file names and column ranges while creating cumulative data files for each year, and generalizable RegEx expressions couldn't be deployed.
+
+
