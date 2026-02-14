@@ -1,0 +1,425 @@
+---
+title: "Homework 1"
+subtitle: "Submission 3, Spring 2026"
+author: "Srijon Sarkar"
+format:
+  pdf:
+    output-file: "sarkar-s-hwk2-3"
+    output-ext:  "pdf"
+    header-includes:
+      - \usepackage{float}
+      - \floatplacement{table}{H}
+---
+
+```{r}
+#| include: false
+
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, ggplot2, dplyr, lubridate, stringr, readxl, data.table, gdata, scales, data.table, knitr, kableExtra)
+
+source("..//functions-1.R")
+
+
+data.2014 <- read.csv('../data/output/data-2014.csv')
+data.2015 <- read.csv('../data/output/data-2015.csv')
+data.2016 <- read.csv('../data/output/data-2016.csv')
+data.2017 <- read.csv('../data/output/data-2017.csv')
+data.2018 <- read.csv('../data/output/data-2018.csv')
+data.2019 <- read.csv('../data/output/data-2019.csv')
+
+
+data.full <- rbind(data.2014, data.2015, data.2016, data.2017, data.2018, data.2019)
+```
+## Problem 1
+
+```{r}
+#| echo: false
+#| warning: false
+#| fig-cap: "Number of Plans by County over Years"
+
+plan_counts <- data.full %>% 
+    group_by(fips, year) %>%
+    summarise(plan_count = n(), .groups = "drop")
+
+ggplot(plan_counts, aes(x = factor(year), y = plan_count)) +
+    geom_boxplot(outlier.shape = NA, alpha = 0.5) + 
+    coord_cartesian(ylim = c(0, 70)) +
+    labs(
+        x    = "Year",
+        y    = "Plan Count",
+        title = "Distribution of Plan Counts by Year") 
+```
+
+The number of plans would be sufficient, more skewed towards the side of being too many for potential enrollees to choose from, as we further see the number of plans per year to increase on average.
+
+```{r}
+#| include: false
+
+data.full <- data.full %>% mutate (basic_premium = case_when(
+        rebate_partc > 0 ~ 0,
+        partd == "No" & !is.na(premium) & is.na(premium_partc) ~ premium,
+        TRUE ~ premium_partc
+      ),
+      bid = case_when(
+        rebate_partc == 0 & basic_premium > 0 ~ (payment_partc + basic_premium) / riskscore_partc,
+        rebate_partc > 0  | basic_premium == 0 ~  payment_partc / riskscore_partc,
+        TRUE ~ NA_real_
+      )
+    )
+```
+
+\newpage
+## Problem 2
+
+```{r}
+#| echo: false
+#| warning: false
+#| fig-cap: "Comparison of bids between Year 2014 and Year 2018"
+
+data.full %>%
+  filter(year %in% c(2014, 2018)) %>%
+  ggplot(aes(x = bid, fill = factor(year))) +
+  geom_histogram(alpha = 0.5, bins = 40, position = "identity", color = "white") +
+  scale_fill_manual(values = c("2014" = "blue", "2018" = "pink")) +
+  labs(
+    x = "Bid",
+    y = "Plan Count",
+    title = "Year 2014 vs 2018",
+    fill = "Year"
+  ) +
+  theme_minimal()
+```
+
+Towards the tails we notice 2018 to have lesser plan bids as opposed to 2014 though minor. But, we see the plan count to have substanstially increased in 2018 compared to 2014.
+
+\newpage
+## Problem 3
+
+```{r}
+#| echo: false
+#| warning: false
+#| fig-cap: "Mean HHI over Years"
+
+hhi_data <- data.full %>%
+  mutate(share = avg_enrollment / avg_enrolled) %>%
+  group_by(fips, year) %>%
+  summarise(HHI = sum(share^2, na.rm = TRUE), .groups = "drop") %>% 
+  group_by(year) %>% 
+  summarise(mean_HHI = mean(HHI, na.rm = TRUE), .groups = "drop")
+
+ggplot(hhi_data, aes(x = year, y = mean_HHI)) + geom_line() + geom_point() + theme_minimal() + labs(
+    x = "Year",
+    y = "Mean HHI",
+    title = "HHI change over years, 2014–2019"
+  )
+```
+
+We notice the HHI (scaled between 0 and 1) has decreased over the years, indicating an increase in competitive markets. Particularly, the steep decrement from 2016 through 2019 is noticeable.
+
+\newpage
+## Problem 4
+
+```{r}
+#| echo: false
+#| warning: false
+#| fig-cap: "Aggregate MA share over Years"
+
+ma_share_yearly <- data.full %>%
+    mutate(ma_share = avg_enrolled / avg_eligibles) %>%
+    distinct(fips, year, .keep_all = TRUE) %>%
+    group_by(year) %>%
+    summarise(mean_share = weighted.mean(ma_share, w = avg_eligibles, na.rm = TRUE), .groups = "drop")
+
+ggplot(ma_share_yearly, aes(x = year, y = mean_share)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  labs(
+    x = "Year",
+    y = "Average MA Share",
+    title = "Average Medicare Advantage Share, 2014–2019"
+  )
+```
+
+The mean Medicare Advantage share in the market (again scaled between 0 to 1) has increased over time from 2014 to 2019.
+
+\newpage
+# Estimate ATEs
+
+## Problem 5
+
+```{r}
+#| include: false
+data.2018 <- read.csv('../data/output/data-2018-ffs.csv')
+
+ma.share.2018 <- data.2018 %>%
+    filter(!is.na(avg_enrolled), avg_enrolled >  0) %>%
+    filter(!is.na(avg_enrollment), avg_enrollment > 0) %>%
+    group_by(fips, year) %>%
+    mutate(ma_share = avg_enrollment / avg_enrolled) %>%
+    ungroup()
+
+market.2018 <- ma.share.2018 %>%
+    group_by(fips) %>%
+    summarize(hhi = sum(ma_share^2, na.rm = TRUE),
+              bid = mean(bid, na.rm = TRUE),
+              avg_ffscost = mean(avg_ffscost, na.rm = TRUE),
+              avg_eligibles = mean(avg_eligibles, na.rm = TRUE),
+              .groups = "drop")
+
+hhi_data_33 <- quantile(market.2018$hhi, 0.33, na.rm = TRUE)
+hhi_data_66 <- quantile(market.2018$hhi, 0.66, na.rm = TRUE)
+
+market.2018 <- market.2018 %>%
+    mutate(market_type = case_when(
+        hhi <= hhi_data_33 ~ "Competitive",
+        hhi >= hhi_data_66 ~ "Uncompetitive",
+        TRUE ~ NA_character_))
+
+avg_bid_by_market <- market.2018 %>%
+    filter(!is.na(market_type), !is.na(bid)) %>%
+    group_by(market_type) %>%
+    summarize(avg_bid = mean(bid, na.rm = TRUE), n_markets = n(), .groups = "drop")
+
+avg_bid_by_market
+```
+
+```{r}
+#| tbl-cap: Average Bid Table for Year 2018
+#| echo: false
+
+options(knitr.kable.NA = 0)
+
+library(knitr)
+library(kableExtra)
+
+avg_bid_by_market %>%
+  mutate(
+    market_type = recode(
+      market_type,
+      "Competitive"   = "Competitive",
+      "Uncompetitive" = "Uncompetitive"
+    )
+  ) %>%
+  kable(
+    col.names = c("Market Type", "Average Bid", "Market Count"),
+    digits = 2,
+    format.args = list(big.mark = ","),
+    booktabs = TRUE
+  ) %>%
+  kable_styling(latex_options = "hold_position")
+```
+
+\newpage
+## Problem 6
+
+```{r}
+#| include: false
+market.2018 <- market.2018 %>%
+    mutate(
+        treated = case_when(
+            market_type == "Uncompetitive" ~ "Treated (high HHI)",
+            market_type == "Competitive" ~ "Control (low HHI)",
+            TRUE ~ NA_character_
+        ))
+
+cuts <- quantile(market.2018$avg_ffscost, probs = c(0, .25, .5, .75, 1), na.rm = TRUE)
+
+market.2018$ffs_q <- cut(
+    market.2018$avg_ffscost, 
+    breaks = cuts, 
+    include.lowest = TRUE,
+    labels = 1:4)
+
+market.2018 <- market.2018 %>%
+  mutate(
+    ffs_q1 = as.integer(ffs_q == "1"),
+    ffs_q2 = as.integer(ffs_q == "2"),
+    ffs_q3 = as.integer(ffs_q == "3"),
+    ffs_q4 = as.integer(ffs_q == "4")
+  )
+
+bid_table <- market.2018 %>%
+  filter(!is.na(treated), !is.na(ffs_q)) %>%
+  group_by(treated, ffs_q) %>%
+  summarize(mean_bid = mean(bid, na.rm = TRUE)) %>%
+  tidyr::pivot_wider(
+    names_from = treated,
+    values_from = mean_bid,
+    names_prefix = "bid_"
+  )
+
+bid_table
+```
+
+```{r}
+#| tbl-cap: Average Bids as per FFS Quartiles and HHI
+#| echo: false
+
+options(knitr.kable.NA = 0)
+
+library(knitr)
+library(kableExtra)
+
+bid_table %>%
+  kable(
+    col.names = c("FFS Quartile", "Low HHI", "High HHI"),
+    digits = 2,
+    format.args = list(big.mark = ","),
+    booktabs = TRUE
+  ) %>%
+  kable_styling(latex_options = "hold_position")
+```
+
+\newpage
+# Problem 7
+
+```{r}
+#| include: false
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+install.packages("Matching")
+```
+
+```{r}
+#| include: false
+
+market.2018 <- market.2018 %>%
+  filter(!is.na(bid), !is.na(market_type), 
+         !is.na(ffs_q),!is.na(ffs_q1), !is.na(ffs_q2), !is.na(ffs_q3), !is.na(ffs_q4))
+
+ate_inv_var <- Matching::Match(Y=market.2018$bid,
+                Tr=as.integer(market.2018$market_type == "Uncompetitive"),
+                X= (market.2018 %>% select(ffs_q1, ffs_q2, ffs_q3, ffs_q4)),
+                M=1,
+                Weight=1,
+                version = "fast",
+                estimand="ATE")
+
+ate_mah <- Matching::Match(Y=market.2018$bid,
+                          Tr=as.integer(market.2018$market_type == "Uncompetitive"),
+                          X= (market.2018 %>% select(ffs_q1, ffs_q2, ffs_q3, ffs_q4)),
+                          M=1,
+                          Weight=2,
+                          version = "fast",
+                          estimand="ATE")
+     
+
+market.2018 <- market.2018 %>% mutate(treat = as.integer(market_type == "Uncompetitive"))
+
+logit.model <- glm(treat ~ ffs_q1 + ffs_q2 + ffs_q3 + ffs_q4, family = binomial, data = market.2018)
+market.2018$ps <- fitted(logit.model)
+
+market.2018 <- market.2018 %>%
+  mutate(ipw = case_when(
+    treat == 1 ~ 1/ps,
+    treat == 0 ~ 1/(1 - ps)
+  ))
+
+mean.w1 <- market.2018 %>%
+  filter(treat == 1) %>%
+  summarize(mean_y = weighted.mean(bid, ipw))
+
+mean.w0 <- market.2018 %>%
+  filter(treat == 0) %>%
+  summarize(mean_y = weighted.mean(bid, ipw))
+
+ate_ipw <- mean.w1$mean_y - mean.w0$mean_y
+
+reg1 <- lm(bid ~ ffs_q1 + ffs_q2 + ffs_q3 + ffs_q4, data = market.2018 %>% filter(treat == 1))
+reg0 <- lm(bid ~ ffs_q1 + ffs_q2 + ffs_q3 + ffs_q4, data = market.2018 %>% filter(treat == 0))
+
+pred1 <- predict(reg1, newdata = market.2018)
+pred0 <- predict(reg0, newdata = market.2018)
+
+ate_regression <- mean(pred1 - pred0)
+
+results_table <- data.frame(
+  ate_inv_var = ate_inv_var$est,
+  ate_mahalanobis = ate_mah$est, 
+  ate_ipw = ate_ipw,
+  ate_regression = ate_regression
+)
+
+results_table
+```
+
+```{r}
+#| tbl-cap: ATE through different estimators
+#| echo: false
+
+options(knitr.kable.NA = 0)
+
+library(knitr)
+library(kableExtra)
+
+results_table %>%
+  kable(
+    col.names = c(
+      "ATE (Inverse Variance)",
+      "ATE (Mahalanobis Match)",
+      "ATE (IPW)",
+      "ATE (Regression Adj.)"
+    ),
+    digits = 4,
+    format.args = list(big.mark = ","),
+    booktabs = TRUE
+  ) %>%
+  kable_styling(latex_options = "hold_position")
+```
+
+\newpage
+## Problem 8. 
+
+ATE calculated with all the method estimators, that is, nearest neighbor matching with inverse variance distance and Mahalanobis distance, and also Inverse propensity weighting and simple linear regression, are all the same, indicating the validity and robustness of the markers leading up to the calculation of the Average Treatment Effect and showcasing its invariance to calculation processes.
+
+\newpage
+## Problem 9. 
+
+We will use my favorite Mahalanobis distance on total Medicare beneficiaries alongside the FFS quartile.
+
+```{r}
+#| include: false
+ate_mah_new <- Matching::Match(
+  Y = market.2018$bid,
+  Tr = as.integer(market.2018$market_type == "Uncompetitive"),
+  X = (market.2018%>% select(avg_ffscost, avg_eligibles)),
+  M = 1,
+  Weight = 2,
+  version = "fast",
+  estimand = "ATE"
+)
+```
+
+```{r}
+#| tbl-cap: Comparing change in ATE upon additional covariate
+#| echo: false
+
+options(knitr.kable.NA = 0)
+
+library(knitr)
+library(kableExtra)
+
+comparison_table <- data.frame(
+  Estimator = c("Mahalanobis Match", "Mahalanobis + Beneficiaries"),
+  ATE = c(ate_mah$est, ate_mah_new$est)
+)
+
+comparison_table %>%
+  kable(
+    col.names = c("Estimator", "ATE Estimate"),
+    digits = 4,
+    format.args = list(big.mark = ","),
+    booktabs = TRUE
+  ) %>%
+  kable_styling(latex_options = "hold_position")
+```
+
+The absolute value of ATE has gone up when the total number of Medicare beneficiaries is included as a covariate when matching. It is still comparable to other ATEs obtained via nearest neighbor matching. It indicates that the inclusion of unbiased, nonconfounding covariates could aid in strongly hypothesizing about the null thesis when considering alternative questions about whether something brings an effect or not.
+
+\newpage
+## Problem 10
+
+My experience was fulfilling working with these large data chunks; it really completed my prior experiences. One thing I learned is that my code runs much cleaner and is easier to navigate, as I built most of it from class notes, my concepts, and simple structural logic, rather than using LLMs that I genuinely use strictly for my personal use. One thing that surprised me was how strenuous data management could be when I had to change file names and column ranges while creating cumulative data files for each year, and generalizable RegEx expressions couldn't be deployed.
+
