@@ -1,0 +1,1 @@
+Analysis on distribution of plan bids, average HHI, average share of Medicare Advantage (relative to all Medicare eligibles) with methods including market splits into quartiles based on Medicare fee-for-service (FFS) costs, and further different treatment estimators such as inverse variance distance, Mahalanobis distance, inverse propensity weighting, and linear regression.
